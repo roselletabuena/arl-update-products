@@ -1,40 +1,38 @@
 import { FastifyPluginAsync } from "fastify";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamoConfig } from "../utils";
-import { Product } from "../models/productInterfaces";
+import { handleError } from "../utils/errorUtils";
 
 const client = new DynamoDBClient(dynamoConfig());
 const dynamodb = DynamoDBDocumentClient.from(client);
 
 const root: FastifyPluginAsync = async (fastify, _): Promise<void> => {
-  fastify.put("/products/:productId", async function (request, reply) {
+  fastify.delete("/products/:productId", async function (request, reply) {
     const { productId } = request.params as { productId: "string" };
 
-    const data = request.body as Product;
-
     try {
-      const command = new UpdateCommand({
+      console.log("productId: ", productId);
+      const command = new DeleteCommand({
         TableName: process.env.TABLE_NAME,
-        Key: { id: productId, productId: data.productId },
-        UpdateExpression: "SET #name = :name",
-        ExpressionAttributeNames: {
-          "#name": "name",
-        },
-        ExpressionAttributeValues: {
-          ":name": data.name,
-        },
-        ReturnValues: "ALL_NEW",
+        Key: { id: productId },
+        ConditionExpression: "attribute_exists(id)",
       });
 
-      const response = await dynamodb.send(command);
+      await dynamodb.send(command);
 
-      return reply.status(200).send({ updatedProduct: response.Attributes });
+      return reply.status(200).send({
+        message: `Product with ID ${productId} has been successfully deleted`,
+      });
     } catch (error) {
-      console.error("Error updating product:", error);
-      reply
-        .status(500)
-        .send({ error: "Failed to update product", productId: productId });
+      const { message, statusCode } = handleError(error);
+
+      if (statusCode === 404) {
+        return reply.status(404).send({ error: message });
+      }
+
+      console.error("Error deleting product:", error);
+      reply.status(statusCode).send({ error: message });
     }
   });
 };
